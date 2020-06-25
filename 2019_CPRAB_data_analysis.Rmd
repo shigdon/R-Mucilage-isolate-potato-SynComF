@@ -1,0 +1,2131 @@
+---
+title: "CPRAB 2019 Greenhouse Experiment Data Analysis"
+author: "Shawn Higdon"
+date: "8/23/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(multcompView)
+library(emmeans)
+library(cowplot)
+theme_set(theme_grey())
+```
+
+# Experimental Background
+
+* Experiment Duration: 120 Days in Greenhouse as a Randomized Complete Block Design
+
+* 5 Randomized Complete Blocks
+  * 2 Levels of Nitrogen Fertilization (10% and 100% Hoagland Complete Fertilizer Nitrogen)
+    * Fertilized irrigation delivered daily at 500 mL per plant.
+  
+  * 5 Inoculation Levels
+    * Mock-inoculated
+    * Microbial Pool Inoculation
+    * Isolate 201900 Inoculation
+    * Isolate 201849 Inoculation
+    * Isolate 200810 Inoculation
+    
+* Number of Inoculation events: 3
+  * Inoculated first in the laboratory vial during rooting process
+  * Inoculated a second time upon transplant to greenhouse pot
+  * Inoculated a third time 2-weeks post greenhouse transplantation
+  
+* Soil Mixture:
+  * Calcined Clay
+  * Coconut Coire
+  * Sand
+    * Ratio: 2:3:1 (Sand:Coconut Coire: Calcined Clay)
+    
+* Response Variables:
+  * Dry Shoot Weight
+  * Dry Root Weight
+  * Fresh Tuber Weight
+  * Tuber Number
+
+# Data Analysis
+
+## Full DataSet
+
+> Linear Modeling
+
+Data measurements were fit to a linear model using the `lm` function of R.
+The normality of the data was assessed by visualizing parameters of each linear model in two ways:
+
+* Normal Q-Q plots (Standardized residuals vs. Theoretical Quantiles)
+* Scale - Location plots (Squareroot of Standard residuals vs. fitted values)
+
+> Create Stats Functions for Bar Plots
+
+Stats functions created for standard error of mean and 95% confidence intervals
+
+```{r}
+# Creating a function that provides 95% CI for the data vector using a t-distribution
+
+conf_int95 <- function(data) {
+    n <- length(data)
+    error <- qt(0.975, df=n-1) * sd(data, na.rm = TRUE)/sqrt(n)
+    return(error)
+}
+
+# Create a function that calculates the standard error for the data
+
+std_error <- function(data) {
+  n <- length(data)
+  se <- sd(data, na.rm = TRUE)/sqrt(n)
+  return(se)
+}
+
+```
+
+> High Nitrogen and Low Nitrogen treated plants had clear differences in total biomass accumulation. Comparisons between these two groups are not made in this report.
+
+### High Nitrogen Treatment
+```{r}
+
+hiN_data <- read_csv("./data_csv/2019_CPRAB_high_N_data.csv", col_types="cccfffnnnnnc")
+#View(high_n_data)
+str(hiN_data)
+summary(hiN_data)
+```
+
+#### Shoot Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry shoot data
+lm_hiN_shoots <- lm(shoot_dry_wt_g ~ 1 + inoc, hiN_data)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_shoots, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_hiN_shoots)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.shoots.emm.all <- emmeans(lm_hiN_shoots, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.shoots.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_allreps_shoot/hiN.allreps.shoot.CI.plot.pdf")
+hiN.shoot.CI.plot <- plot(hiN.shoots.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment")
+hiN.shoot.CI.plot
+dev.off()
+hiN.shoot.CI.plot
+
+# Pairwise P-Value Plot
+hiN.shoot.pwpp <- pwpp(hiN.shoots.emm.all) # Pairwise P-value Plot
+
+hiN.shoot.pwpp <- hiN.shoot.pwpp + labs(title = "High Nitrogen Dry Shoot Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.shoot.pwpp
+
+ggsave("./Plots/hiN_allreps_shoot/hiN.allreps.shoot.pwpp.pdf", hiN.shoot.pwpp)
+```
+
+##### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_shoots, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Mock-inoculated plants had the highest average dry shoot weight, but confidence levels in the difference estimates are low with the entire dataset.
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+hiN_data_grp <- hiN_data %>% group_by(inoc)
+
+stat_hiN_shoots <- summarise(hiN_data_grp, N=length(shoot_dry_wt_g), Average=mean(shoot_dry_wt_g, na.rm = TRUE), CI95=conf_int95(shoot_dry_wt_g), SE=std_error(shoot_dry_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_shoot_control <- stat_hiN_shoots[4,3] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_shoots$control <- as.numeric(hi_shoot_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_shoots <- mutate(stat_hiN_shoots, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_shoot <- ggplot(stat_hiN_shoots, aes(x = inoc, y = Average))
+bar_hiN_shoot <- bar_hiN_shoot + geom_bar(stat = "identity", size=.5, fill="lightgreen")
+bar_hiN_shoot <- bar_hiN_shoot + geom_hline(aes(yintercept=stat_hiN_shoots$control), colour="#990000", linetype="dashed")
+bar_hiN_shoot <- bar_hiN_shoot + labs(title = "High N Dry Shoot Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Dry Weight (g)")
+bar_hiN_shoot <- bar_hiN_shoot + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_shoot <- bar_hiN_shoot + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_hiN_shoot <- bar_hiN_shoot + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_hiN_shoot <- bar_hiN_shoot + scale_y_continuous(expand = c(0,0), limits = c(0,90))
+
+bar_hiN_shoot
+
+ggsave("./Plots/hiN_allreps_shoot/hiN.allreps.shoot.barplot.pdf", bar_hiN_shoot)
+
+```
+
+> Mock-inoculated plants had the highest average dry shoot weight when analyzing the entire dataset.
+
+#### Root Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Root data
+lm_hiN_root <- lm(root_dry_wt_g ~ 1 + inoc, hiN_data)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_root, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_hiN_root)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.root.emm.all <- emmeans(lm_hiN_root, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.root.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_allreps_root/hiN.allreps.root.CI.plot.pdf")
+hiN.root.CI.plot <- plot(hiN.root.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Root Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment")
+hiN.root.CI.plot
+dev.off()
+hiN.root.CI.plot
+
+# Pairwise P-Value Plot
+hiN.root.pwpp <- pwpp(hiN.root.emm.all) # Pairwise P-value Plot
+
+hiN.root.pwpp <- hiN.root.pwpp + labs(title = "High Nitrogen Dry Root Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.root.pwpp
+
+ggsave("./Plots/hiN_allreps_root/hiN.allreps.root.pwpp.pdf", hiN.root.pwpp)
+
+```
+
+##### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_root, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Statistical analysis of mean estimates for dry root weights of plants under high nitrogen fertilization indicate that confidence in observed mean differences among treatment groups is low. However, all inoculated groups have higher average dry root weight than the mock-inoculated group. 
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+hiN_data_grp <- hiN_data %>% group_by(inoc)
+
+stat_hiN_roots <- summarise(hiN_data_grp, N=length(root_dry_wt_g), Average=mean(root_dry_wt_g, na.rm = TRUE), CI95=conf_int95(root_dry_wt_g), SE=std_error(root_dry_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_root_control <- stat_hiN_roots[4,3] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_roots$control <- as.numeric(hi_root_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_roots <- mutate(stat_hiN_roots, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_root <- ggplot(stat_hiN_roots, aes(x = inoc, y = Average))
+bar_hiN_root <- bar_hiN_root + geom_bar(stat = "identity", size=.5, fill="tan3")
+bar_hiN_root <- bar_hiN_root + geom_hline(aes(yintercept=stat_hiN_roots$control), colour="#990000", linetype="dashed")
+bar_hiN_root <- bar_hiN_root + labs(title = "High N Dry Root Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Dry Weight (g)")
+bar_hiN_root <- bar_hiN_root + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_root <- bar_hiN_root + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_hiN_root <- bar_hiN_root + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_hiN_root <- bar_hiN_root + scale_y_continuous(expand = c(0,0), limits = c(0,55))
+
+bar_hiN_root
+
+# save plot
+ggsave("./Plots/hiN_allreps_root/hiN.allreps.root.barplot.pdf", bar_hiN_root)
+```
+
+> 201849 and 201900-inoculated plants had higher mean dry root weights than the mock-inoculated plants, but the error bars are overlapping.
+
+#### Tuber Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Tuber data
+lm_hiN_tuber <- lm(tuber_wt_g ~ 1 + inoc, hiN_data)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_tuber, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_hiN_tuber)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.tuber.emm.all <- emmeans(lm_hiN_tuber, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.tuber.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_allreps_tuber_wt/hiN.allreps.tuber_wt.CI.plot.pdf")
+hiN.tuber.CI.plot <- plot(hiN.tuber.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Root Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment")
+hiN.tuber.CI.plot
+dev.off()
+hiN.tuber.CI.plot
+
+# Pairwise P-Value Plot
+hiN.tuber.pwpp <- pwpp(hiN.tuber.emm.all) # Pairwise P-value Plot
+
+hiN.tuber.pwpp <- hiN.tuber.pwpp + labs(title = "High Nitrogen Tuber Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Fresh Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.tuber.pwpp
+
+ggsave("./Plots/hiN_allreps_tuber_wt/hiN.allreps.tuber_wt.pwpp.pdf", hiN.tuber.pwpp)
+
+```
+
+##### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_tuber, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> When analyzing the full dataset, inoculation with microbes did not produce average tuber weights that were significantly higher than that of the mock-inoculated treatment group.
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+hiN_data_grp <- hiN_data %>% group_by(inoc)
+
+stat_hiN_tuber_wt <- summarise(hiN_data_grp, N=length(tuber_wt_g), Average=mean(tuber_wt_g, na.rm = TRUE), CI95=conf_int95(tuber_wt_g), SE=std_error(tuber_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+
+hi_tuber_wt_control <- stat_hiN_tuber_wt[4,3] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_tuber_wt$control <- as.numeric(hi_tuber_wt_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_tuber <- mutate(stat_hiN_tuber_wt, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_tuber_wt <- ggplot(stat_hiN_tuber_wt, aes(x = inoc, y = Average))
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + geom_bar(stat = "identity", size=.5, fill="lightsalmon")
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + geom_hline(aes(yintercept=stat_hiN_tuber_wt$control), colour="#990000", linetype="dashed")
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + labs(title = "High N Tuber Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Fresh Weight (g)")
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_hiN_tuber_wt <- bar_hiN_tuber_wt + scale_y_continuous(expand = c(0,0), limits = c(0,400))
+
+bar_hiN_tuber_wt
+
+# save plot
+ggsave("./Plots/hiN_allreps_tuber_wt/hiN.allreps.tuber_wt.barplot.pdf", bar_hiN_tuber_wt)
+```
+
+> Based on the full dataset, mock-inoculated potato plants produced the highest tuber weight.
+
+#### Tuber Number
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Root data
+lm_hiN_tub_num <- lm(n_tuber ~ 1 + inoc, hiN_data)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_root, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_hiN_tub_num)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.tub_num.emm.all <- emmeans(lm_hiN_tub_num, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.tub_num.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_allreps_tuber_n/hiN.allreps.tub_num.CI.plot.pdf")
+hiN.tub_num.CI.plot <- plot(hiN.tub_num.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Tuber Number Under High-N",
+                               ylab = "Inoculation Treatment")
+hiN.tub_num.CI.plot
+dev.off()
+hiN.tub_num.CI.plot
+
+# Pairwise P-Value Plot
+hiN.tub_num.pwpp <- pwpp(hiN.tub_num.emm.all) # Pairwise P-value Plot
+
+hiN.tub_num.pwpp <- hiN.tub_num.pwpp + labs(title = "High Nitrogen Tuber Number (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Tuber Number") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.tub_num.pwpp
+
+ggsave("./Plots/hiN_allreps_tuber_n//hiN.allreps.tub_num_wt.pwpp.pdf", hiN.tub_num.pwpp)
+
+```
+
+##### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_tub_num, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Average number of tubers was higher in all inoculated treatment groups compared to the mock-inoculated control group, but the confidence levels in the mean estimates for this response variable are low.
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+stat_hiN_tub_num <- summarise(hiN_data_grp, N=length(n_tuber), Average=mean(n_tuber, na.rm = TRUE), CI95=conf_int95(n_tuber), SE=std_error(n_tuber))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+hi_tub_num_control <- stat_hiN_tub_num[4,3] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_tub_num$control <- as.numeric(hi_tub_num_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_tub_num <- mutate(stat_hiN_tub_num, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_tub_num <- ggplot(stat_hiN_tub_num, aes(x = inoc, y = Average))
+bar_hiN_tub_num <- bar_hiN_tub_num + geom_bar(stat = "identity", size=.5, fill="dodgerblue")
+bar_hiN_tub_num <- bar_hiN_tub_num + geom_hline(aes(yintercept=stat_hiN_tub_num$control), colour="#990000", linetype="dashed")
+bar_hiN_tub_num <- bar_hiN_tub_num + labs(title = "High N Tuber Number (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Tuber Number")
+bar_hiN_tub_num <- bar_hiN_tub_num + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_tub_num <- bar_hiN_tub_num + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_hiN_tub_num <- bar_hiN_tub_num + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_hiN_tub_num <- bar_hiN_tub_num + scale_y_continuous(expand = c(0,0), limits = c(0,15))
+
+bar_hiN_tub_num
+
+# save plot
+ggsave("./Plots/hiN_allreps_tuber_n/hiN.allreps.tub_num.barplot.pdf", bar_hiN_tub_num)
+```
+
+> Analysis of the complete dataset suggests that there were no observed meaningful differences in average tuber number among the treatment groups.
+
+
+
+## Low Nitrogen Treatment
+```{r}
+lowN_data <- read_csv("./data_csv/2019_CPRAB_low_N_data.csv", col_types="cccfffnnnnnc")
+#View(lowgh_n_data)
+str(lowN_data)
+summary(lowN_data)
+```
+
+#### Shoot Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry shoot data
+lm_lowN_shoots <- lm(shoot_dry_wt_g ~ 1 + inoc, lowN_data)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_shoots, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_lowN_shoots)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.shoots.emm.all <- emmeans(lm_lowN_shoots, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.shoots.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_allreps_shoot/lowN.allreps.shoot.CI.plot.pdf")
+lowN.shoot.CI.plot <- plot(lowN.shoots.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment")
+lowN.shoot.CI.plot
+dev.off()
+lowN.shoot.CI.plot
+
+# Pairwise P-Value Plot
+lowN.shoot.pwpp <- pwpp(lowN.shoots.emm.all) # Pairwise P-value Plot
+
+lowN.shoot.pwpp <- lowN.shoot.pwpp + labs(title = "Low Nitrogen Dry Shoot Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.shoot.pwpp
+
+ggsave("./Plots/lowN_allreps_shoot/lowN.allreps.shoot.pwpp.pdf", lowN.shoot.pwpp)
+
+```
+
+> Based on the experimental data, the estimated mean dry shoot weight of potato plants subjected to low N treatment while receiving mono-isolate inoculations with bacterial isolates is higher than that of the mock inoculated control plants. Plants under low-N that received the inoculation pool of 3 microbes have a mean shoot weight higher than the mock, but the confidence in the mean estimate difference is much lower. The P-values for the mean estimate comparisons between the mock control plants and those receiving 201849 and 201900 inoculations are both very low, which boosts the confidence in the estimated difference in mean shoot weight.
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+lowN_data_grp <- lowN_data %>% group_by(inoc)
+
+stat_lowN_shoots <- summarise(lowN_data_grp, N=length(shoot_dry_wt_g), Average=mean(shoot_dry_wt_g, na.rm = TRUE), CI95=conf_int95(shoot_dry_wt_g), SE=std_error(shoot_dry_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+low_shoot_control <- stat_lowN_shoots[4,3] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_shoots$control <- as.numeric(low_shoot_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_shoots <- mutate(stat_lowN_shoots, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_shoot <- ggplot(stat_lowN_shoots, aes(x = inoc, y = Average))
+bar_lowN_shoot <- bar_lowN_shoot + geom_bar(stat = "identity", size=.5, fill="lightgreen")
+bar_lowN_shoot <- bar_lowN_shoot + geom_hline(aes(yintercept=stat_lowN_shoots$control), colour="#990000", linetype="dashed")
+bar_lowN_shoot <- bar_lowN_shoot + labs(title = "Low N Dry Shoot Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Dry Weight (g)")
+bar_lowN_shoot <- bar_lowN_shoot + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_shoot <- bar_lowN_shoot + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_lowN_shoot <- bar_lowN_shoot + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_lowN_shoot <- bar_lowN_shoot + scale_y_continuous(expand = c(0,0), limits = c(0,7.5))
+
+# significance table
+bar_lowN_shoot_label.df <- data.frame(inoc = c("201849", "201900"),
+                                          Average = c(6, 7))
+
+bar_lowN_shoot <- bar_lowN_shoot + geom_text(data = bar_lowN_shoot_label.df, label = "*", size = 8)
+
+bar_lowN_shoot
+
+# save plot
+ggsave("./Plots/lowN_allreps_shoot/lowN.allreps.shoot.barplot.pdf", bar_lowN_shoot)
+```
+
+#### Root Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Root data
+lm_lowN_root <- lm(root_dry_wt_g ~ 1 + inoc, lowN_data)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_root, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_lowN_root)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.root.red.emm.all <- emmeans(lm_lowN_root, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.root.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_allreps_root/lowN.allreps.root.CI.plot.pdf")
+lowN.red.root.CI.plot <- plot(lowN.root.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment")
+lowN.red.root.CI.plot
+dev.off()
+lowN.red.root.CI.plot
+
+# Pairwise P-Value Plot
+lowN.red.root.pwpp <- pwpp(lowN.root.red.emm.all) # Pairwise P-value Plot
+
+lowN.red.root.pwpp <- lowN.red.root.pwpp + labs(title = "Low Nitrogen Dry Shoot Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.red.root.pwpp
+
+ggsave("./Plots/lowN_allreps_root/lowN.allreps.root.pwpp.pdf", lowN.red.root.pwpp)
+```
+
+> Based on the experimental data, the estimated mean dry root weight of potato plants subjected to low N treatment with microbial inoculation are all higher than that of the mock inoculated control. However, the confidence levels for the mean estimate differences are low. The lower confidence intervals for the inoculated plant means overlap with the upper confidence interval of the mock inoculated plants. This decreases our confidence in the likelihood that the difference was due to random chance alone. 
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+lowN_data_grp <- lowN_data %>% group_by(inoc)
+
+stat_lowN_roots <- summarise(lowN_data_grp, N=length(root_dry_wt_g), Average=mean(root_dry_wt_g, na.rm = TRUE), CI95=conf_int95(root_dry_wt_g), SE=std_error(root_dry_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_root_control <- stat_lowN_roots[4,3] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_roots$control <- as.numeric(low_root_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_roots <- mutate(stat_lowN_roots, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_root <- ggplot(stat_lowN_roots, aes(x = inoc, y = Average))
+bar_lowN_root <- bar_lowN_root + geom_bar(stat = "identity", size=.5, fill="tan3")
+bar_lowN_root <- bar_lowN_root + geom_hline(aes(yintercept=stat_lowN_roots$control), colour="#990000", linetype="dashed")
+bar_lowN_root <- bar_lowN_root + labs(title = "Low N Dry Root Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Dry Weight (g)")
+bar_lowN_root <- bar_lowN_root + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_root <- bar_lowN_root + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_lowN_root <- bar_lowN_root + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_lowN_root <- bar_lowN_root + scale_y_continuous(expand = c(0,0), limits = c(0,30))
+
+bar_lowN_root
+
+# save plot
+ggsave("./Plots/lowN_allreps_root/lowN.allreps.root.barplot.pdf", bar_lowN_root)
+
+```
+
+> Average dry root weights were all higher for microbe inoculated plants compared to mock-inoculated controls. However, the confidence levels in the mean estimations are low due to high variance and adjusted p-values for the comparisons of treatment groups above.
+
+#### Tuber Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Tuber data
+lm_lowN_tuber <- lm(tuber_wt_g ~ 1 + inoc, lowN_data)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_tuber, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_lowN_tuber)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.tuber.emm.all <- emmeans(lm_lowN_tuber, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.tuber.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_reduced_tuber_wt/lowN.allreps.tuber_wt.CI.plot.pdf")
+lowN.tuber.CI.plot <- plot(lowN.tuber.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Tuber Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+lowN.tuber.CI.plot
+dev.off()
+lowN.tuber.CI.plot
+
+# Pairwise P-Value Plot
+lowN.tuber.pwpp <- pwpp(lowN.tuber.emm.all) # Pairwise P-value Plot
+
+lowN.tuber.pwpp <- lowN.tuber.pwpp + labs(title = "Low Nitrogen Tuber Weight (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Fresh Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.tuber.pwpp
+
+ggsave("./Plots/lowN_reduced_tuber_wt/lowN.allreps.tuber_wt.pwpp.pdf", lowN.tuber.pwpp)
+
+```
+
+> Based on the experimental data, the estimated mean dry tuber weight of potato plants subjected to low N treatment with microbial inoculation are all higher than that of the mock inoculated control. However, the confidence levels for the mean estimate differences are low. The lower confidence intervals for the inoculated plant means overlap with the upper confidence interval of the mock inoculated plants. This decreases our confidence in the likelihood that the difference was due to random chance alone. 
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+lowN_data_grp <- lowN_data %>% group_by(inoc)
+
+stat_lowN_tuber_wt <- summarise(lowN_data_grp, N=length(tuber_wt_g), Average=mean(tuber_wt_g, na.rm = TRUE), CI95=conf_int95(tuber_wt_g), SE=std_error(tuber_wt_g))
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_tuber_wt_control <- stat_lowN_tuber_wt[4,3] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_tuber_wt$control <- as.numeric(low_tuber_wt_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_tuber_wt <- mutate(stat_lowN_tuber_wt, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_tuber_wt <- ggplot(stat_lowN_tuber_wt, aes(x = inoc, y = Average))
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + geom_bar(stat = "identity", size=.5, fill="lightsalmon")
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + geom_hline(aes(yintercept=stat_lowN_tuber_wt$control), colour="#990000", linetype="dashed")
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + labs(title = "Low N Dry Root Weight (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Dry Weight (g)")
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_lowN_tuber_wt <- bar_lowN_tuber_wt + scale_y_continuous(expand = c(0,0), limits = c(0,70))
+
+bar_lowN_tuber_wt
+
+# save plot
+ggsave("./Plots/lowN_allreps_tuber_wt/lowN.allreps.tuber_wt.barplot.pdf", bar_lowN_tuber_wt)
+
+```
+
+> Mono-inoculated plants had higher average tuber weights than mock-inoculated and pool-inoculated groups, but confidence in the estimated differences of mean tuber weight is low when analyzing the full dataset.
+
+#### Tuber Number
+
+> Linear Modeling
+
+```{r}
+# linear model of dry Root data
+lm_lowN_tub_num <- lm(n_tuber ~ 1 + inoc, lowN_data)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_root, which = c(2,3))
+par(op)
+```
+
+##### Anova
+```{r}
+anova(lm_lowN_tub_num)
+```
+
+##### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.tub_num.emm.all <- emmeans(lm_lowN_tub_num, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.tub_num.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_allreps_tuber_n/lowN.allreps.tub_num_wt.CI.plot.pdf")
+lowN.tub_num.CI.plot <- plot(lowN.tub_num.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Tuber Number Under Low-N",
+                               ylab = "Inoculation Treatment")
+lowN.tub_num.CI.plot
+dev.off()
+lowN.tub_num.CI.plot
+
+# Pairwise P-Value Plot
+lowN.tub_num.pwpp <- pwpp(lowN.tub_num.emm.all) # Pairwise P-value Plot
+
+lowN.tub_num.pwpp <- lowN.tub_num.pwpp + labs(title = "Low Nitrogen Tuber Number (n = 10)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Tuber Number") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.tub_num.pwpp
+
+ggsave("./Plots/lowN_allreps_tuber_n/lowN.allreps.tub_num_wt.pwpp.pdf", lowN.tub_num.pwpp)
+```
+
+> Based on the full dataset, mono-inoculated plants under low nitrogen had higher average tuber numbers than mock-inoculated, while the pool-inoculated group had the lowest under the same fertilization conditions. Confidence in the estimations of the means is low based on analyzing the full dataset.
+
+##### Bar Plot
+
+> n=10
+
+```{r}
+
+stat_lowN_tub_num <- summarise(lowN_data_grp, N=length(n_tuber), Average=mean(n_tuber, na.rm = TRUE), CI95=conf_int95(n_tuber), SE=std_error(n_tuber))
+
+```
+
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_tub_num_control <- stat_lowN_tub_num[4,3] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_tub_num$control <- as.numeric(low_tub_num_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_tub_num <- mutate(stat_lowN_tub_num, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_tub_num <- ggplot(stat_lowN_tub_num, aes(x = inoc, y = Average))
+bar_lowN_tub_num <- bar_lowN_tub_num + geom_bar(stat = "identity", size=.5, fill="dodgerblue")
+bar_lowN_tub_num <- bar_lowN_tub_num + geom_hline(aes(yintercept=stat_lowN_tub_num$control), colour="#990000", linetype="dashed")
+bar_lowN_tub_num <- bar_lowN_tub_num + labs(title = "Low N Tuber Number (n = 10)",
+                                                x="Inoculation Treatment",
+                                                y="Average Tuber Number")
+bar_lowN_tub_num <- bar_lowN_tub_num + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_tub_num <- bar_lowN_tub_num + theme(
+  plot.title = element_text(size = 16, hjust = 0.5),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 12),
+  axis.title.x = element_text(size = 14),
+  axis.title.y = element_text(size = 14))
+bar_lowN_tub_num <- bar_lowN_tub_num + scale_x_discrete(position = "bottom", expand = c(0,0))
+bar_lowN_tub_num <- bar_lowN_tub_num + scale_y_continuous(expand = c(0,0), limits = c(0,8))
+
+bar_lowN_tub_num
+
+# save plot
+ggsave("./Plots/lowN_allreps_tuber_n/lowN.allreps.tub_num.barplot.pdf", bar_lowN_tub_num)
+```
+
+> While mono-inoculated groups all had higher average number of tubers per plant, the confidence in the comparison of mean-estimations between mono-inoculated groups and the mock-inoculated groups is relatively low based on the P-value for the comparisons. 
+
+## Reduced Dataset
+
+**Remove Blocks 4 and 5**
+
+> Blocks Four and Five experienced much colder climate conditions than Blocks One, Two and Three due to the temperature gradient in the greenhouse. Removing these two blocks reduces the number of plants for each treatment group from 10 to 6. The data will be re-analyzed after having subtracted these two randomized complete blocks.
+
+#### High Nitrogen
+
+> n = 6 for each treatment group
+
+> Remove pool
+
+```{r}
+hiN_data.reduced <- hiN_data %>%
+  filter(plot != "R4" &
+           plot != "R5")
+
+```
+
+##### Shoot Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry shoot data
+lm_hiN_shoot.red <- lm(shoot_dry_wt_g ~ 1 + inoc, hiN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_shoot.red, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_hiN_shoot.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.shoots.red.emm.all <- emmeans(lm_hiN_shoot.red, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.shoots.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_reduced_shoot/hiN.reduced.shoot.CI.plot.pdf")
+hiN.red.shoot.CI.plot <- plot(hiN.shoots.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+hiN.red.shoot.CI.plot
+dev.off()
+hiN.red.shoot.CI.plot
+
+# Pairwise P-Value Plot
+hiN.red.shoot.pwpp <- pwpp(hiN.shoots.red.emm.all) # Pairwise P-value Plot
+
+hiN.red.shoot.pwpp <- hiN.red.shoot.pwpp + labs(title = "High Nitrogen Dry Shoot Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.red.shoot.pwpp
+
+ggsave("./Plots/hiN_reduced_shoot/hiN.reduced.shoot.pwpp.pdf", hiN.red.shoot.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_shoot.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Based on the **reduced experimental data with 3 of the 5 complete blocks**, the estimated mean dry shoot weight of potato plants subjected to high N treatment while receiving inoculations with isolates 201900, 201849 and the pool is higher than that of the mock inoculated control plants. However, our confidence in the mean estimate difference is low and the effect size is relatively small.
+
+###### Bar Plot
+
+> remove Pool, n=6
+
+```{r}
+
+hiN_data.red_grp <- hiN_data.reduced %>% group_by(inoc)
+
+stat_hiN_shoots.red <- summarise(hiN_data.red_grp, Nitrogen = "high", N=length(shoot_dry_wt_g), Average=mean(shoot_dry_wt_g, na.rm = TRUE), CI95=conf_int95(shoot_dry_wt_g), SE=std_error(shoot_dry_wt_g)) %>%
+  filter(inoc != "Pool")
+
+# x-axis labels
+Fig3.x.labels <- c("BCW-200810", "BCW-201849", "BCW-201900", "Control")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_shoot.red_control <- stat_hiN_shoots.red[4,4] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_shoots.red$control <- as.numeric(hi_shoot.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_shoots.red <- mutate(stat_hiN_shoots.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_shoot.red <- ggplot(stat_hiN_shoots.red, aes(x = inoc, y = Average))
+bar_hiN_shoot.red <- bar_hiN_shoot.red + geom_bar(stat = "identity", size=.5, fill="seagreen3")
+bar_hiN_shoot.red <- bar_hiN_shoot.red + geom_hline(aes(yintercept=stat_hiN_shoots.red$control), colour="#000000", linetype="dashed")
+bar_hiN_shoot.red <- bar_hiN_shoot.red + labs(y="Dry Shoot Weight (g)")
+bar_hiN_shoot.red <- bar_hiN_shoot.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_shoot.red <- bar_hiN_shoot.red + theme(
+  axis.text.x = element_text(size = 14, angle = 25, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_hiN_shoot.red <- bar_hiN_shoot.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_hiN_shoot.red <- bar_hiN_shoot.red + scale_y_continuous(expand = c(0,0), limits = c(0,90), breaks = c(0, 15, 30, 45, 60, 75))
+
+bar_hiN_shoot.red
+
+# save plot
+ggsave("./Plots/hiN_reduced_shoot/hiN.reduced.shoot.barplot.pdf", bar_hiN_shoot.red)
+```
+
+> There are no observed differences of interest for shoot weight among treatment groups under high nitrogen fertilization.
+
+##### Root Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry root data
+lm_hiN_root.red <- lm(root_dry_wt_g ~ 1 + inoc, hiN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_root, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_hiN_root.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.root.red.emm.all <- emmeans(lm_hiN_root.red, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.root.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_reduced_root/hiN.reduced.root.CI.plot.pdf")
+hiN.red.root.CI.plot <- plot(hiN.root.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Root Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+hiN.red.root.CI.plot
+dev.off()
+hiN.red.root.CI.plot
+
+# Pairwise P-Value Plot
+hiN.red.root.pwpp <- pwpp(hiN.root.red.emm.all) # Pairwise P-value Plot
+
+hiN.red.root.pwpp <- hiN.red.root.pwpp + labs(title = "Hi Nitrogen Dry Root Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.red.root.pwpp
+
+ggsave("./Plots/hiN_reduced_root/hiN.reduced.root.pwpp.pdf", hiN.red.root.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_root.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Mean root weights are higher for all inoculated plants relative to mock-inoculated controls. The confidence levels in comparisons of the mean root weight for 201900- and 201849-inoculated plants with mock-inoculated plants are higher than those for comparisons of controls to 200810- and Pool-inoculated plants.
+
+###### Bar Plot
+
+> n=10
+
+```{r}
+
+hiN_data.red_grp <- hiN_data.reduced %>% group_by(inoc)
+
+stat_hiN_roots.red <- summarise(hiN_data.red_grp, Nitrogen = "high", N=length(root_dry_wt_g), Average=mean(root_dry_wt_g, na.rm = TRUE), CI95=conf_int95(root_dry_wt_g), SE=std_error(root_dry_wt_g)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_root.red_control <- stat_hiN_roots.red[4,4] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_roots.red$control <- as.numeric(hi_root.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_roots.red <- mutate(stat_hiN_roots.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_root.red <- ggplot(stat_hiN_roots.red, aes(x = inoc, y = Average))
+bar_hiN_root.red <- bar_hiN_root.red + geom_bar(stat = "identity", size=.5, fill="tan3")
+bar_hiN_root.red <- bar_hiN_root.red + geom_hline(aes(yintercept=stat_hiN_roots.red$control), colour="#000000", linetype="dashed")
+bar_hiN_root.red <- bar_hiN_root.red + labs(y="Dry Root Weight (g)")
+bar_hiN_root.red <- bar_hiN_root.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_root.red <- bar_hiN_root.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_hiN_root.red <- bar_hiN_root.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_hiN_root.red <- bar_hiN_root.red + scale_y_continuous(expand = c(0,0), limits = c(0,75), breaks = c(0, 15, 30, 45, 60))
+
+# significance table
+bar_hiN_root.red_label.df <- data.frame(inoc = c("201849", "201900"),
+                                          Average = c(66, 66))
+
+bar_hiN_root.red <- bar_hiN_root.red + geom_text(data = bar_hiN_root.red_label.df, label = "*", size = 8)
+
+bar_hiN_root.red
+
+# save plot
+ggsave("./Plots/hiN_reduced_root/hiN.reduced.root.barplot.pdf", bar_hiN_root.red)
+```
+
+##### Tuber Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry tuber data
+lm_hiN_tuber.red <- lm(tuber_wt_g ~ 1 + inoc, hiN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_tuber, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_hiN_tuber.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.tuber.red.emm.all <- emmeans(lm_hiN_tuber.red, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.tuber.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_reduced_tuber_wt//hiN.reduced.tuber_wt.CI.plot.pdf")
+hiN.red.tuber.CI.plot <- plot(hiN.tuber.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Tuber Weight Under High-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+hiN.red.tuber.CI.plot
+dev.off()
+hiN.red.tuber.CI.plot
+
+# Pairwise P-Value Plot
+hiN.red.tuber.pwpp <- pwpp(hiN.tuber.red.emm.all) # Pairwise P-value Plot
+
+hiN.red.tuber.pwpp <- hiN.red.tuber.pwpp + labs(title = "High Nitrogen Tuber Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Fresh Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.red.tuber.pwpp
+
+ggsave("./Plots/hiN_reduced_tuber_wt//hiN.reduced.tuber_wt.pwpp.pdf", hiN.red.tuber.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_tuber.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> P-values for all pairwise comparisons among treatment groups are high for this response variable. Therefore confidence in the estimated differences based on the dataset is hi.
+
+###### Bar Plot
+
+> n=10
+
+```{r}
+
+hiN_data.red_grp <- hiN_data.reduced %>% group_by(inoc)
+
+stat_hiN_tubers.red <- summarise(hiN_data.red_grp, Nitrogen = "high", N=length(tuber_wt_g), Average=mean(tuber_wt_g, na.rm = TRUE), CI95=conf_int95(tuber_wt_g), SE=std_error(tuber_wt_g)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_tubers.red_control <- stat_hiN_tubers.red[4,4] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_tubers.red$control <- as.numeric(hi_tubers.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_tubers.red <- mutate(stat_hiN_tubers.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_tubers.red <- ggplot(stat_hiN_tubers.red, aes(x = inoc, y = Average))
+bar_hiN_tubers.red <- bar_hiN_tubers.red + geom_bar(stat = "identity", size=.5, fill="tomato3")
+bar_hiN_tubers.red <- bar_hiN_tubers.red + geom_hline(aes(yintercept=stat_hiN_tubers.red$control), colour="#000000", linetype="dashed")
+bar_hiN_tubers.red <- bar_hiN_tubers.red + labs(y="Tuber Weight (g)")
+bar_hiN_tubers.red <- bar_hiN_tubers.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_tubers.red <- bar_hiN_tubers.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_hiN_tubers.red <- bar_hiN_tubers.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_hiN_tubers.red <- bar_hiN_tubers.red + scale_y_continuous(expand = c(0,0), limits = c(0,330), breaks = c(0, 50, 100, 150, 200, 250, 300))
+
+bar_hiN_tubers.red
+
+# save plot
+ggsave("./Plots/hiN_reduced_tuber_wt/hiN.reduced.tubers.barplot.pdf", bar_hiN_tubers.red)
+```
+
+> While the average tuber weight for 201900 inoculated plants is higher than that of the Mock-inoculated group, the confidence in the estimated difference is hi due to high variance in the dataset. 
+
+##### Tuber Number
+
+> Linear Modeling
+
+```{r}
+# linear model of dry tub_num data
+lm_hiN_tub_num.red <- lm(n_tuber ~ 1 + inoc, hiN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_hiN_tub_num, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_hiN_tub_num.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+hiN.tub_num.red.emm.all <- emmeans(lm_hiN_tub_num.red, "inoc")
+
+# Show all comparison statistics
+pairs(hiN.tub_num.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/hiN_reduced_tuber_n/hiN.reduced.tub_num_wt.CI.plot.pdf")
+hiN.red.tub_num.CI.plot <- plot(hiN.tub_num.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Tuber Number Under High-N",
+                               ylab = "Inoculation Treatment")
+hiN.red.tub_num.CI.plot
+dev.off()
+hiN.red.tub_num.CI.plot
+
+# Pairwise P-Value Plot
+hiN.red.tub_num.pwpp <- pwpp(hiN.tub_num.red.emm.all) # Pairwise P-value Plot
+
+hiN.red.tub_num.pwpp <- hiN.red.tub_num.pwpp + labs(title = "High Nitrogen Tuber Number (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Tuber Number") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+hiN.red.tub_num.pwpp
+
+ggsave("./Plots/hiN_reduced_tuber_n//hiN.reduced.tub_num_wt.pwpp.pdf", hiN.red.tub_num.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_hiN_tub_num.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Based on these results, 201849 is the most likely causal factor in the doubling of tuber number observed in the previous experiment.
+
+###### Bar Plot
+
+> n=6
+
+```{r}
+
+hiN_data.red_grp <- hiN_data.reduced %>% group_by(inoc)
+
+stat_hiN_tub_nums.red <- summarise(hiN_data.red_grp, Nitrogen="high", N=length(n_tuber), Average=mean(n_tuber, na.rm = TRUE), CI95=conf_int95(n_tuber), SE=std_error(n_tuber)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+hi_tub_nums.red_control <- stat_hiN_tub_nums.red[4,4] # set the control value for hiN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_hiN_tub_nums.red$control <- as.numeric(hi_tub_nums.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_hiN_tub_nums.red <- mutate(stat_hiN_tub_nums.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - hi N
+bar_hiN_tub_nums.red <- ggplot(stat_hiN_tub_nums.red, aes(x = inoc, y = Average))
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + geom_bar(stat = "identity", size=.5, fill="dodgerblue")
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + geom_hline(aes(yintercept=stat_hiN_tub_nums.red$control), colour="#000000", linetype="dashed")
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + labs(y="Number of Tubers")
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + scale_y_continuous(expand = c(0,0), limits = c(0,16.5), breaks = c(0, 3, 6, 9, 12, 15))
+
+# significance table
+bar_hiN_tub_nums.red_label.df <- data.frame(inoc = c("201849"),
+                                          Average = c(14))
+
+bar_hiN_tub_nums.red <- bar_hiN_tub_nums.red + geom_text(data = bar_hiN_tub_nums.red_label.df, label = "*", size = 8)
+
+bar_hiN_tub_nums.red
+
+# save plot
+ggsave("./Plots/hiN_reduced_tuber_n/hiN.reduced.tub_nums.barplot.pdf", bar_hiN_tub_nums.red)
+```
+
+> Tuber number increased by 100% with 201849 isolate inoculation, but tuber weight is reduced. Effect on Tuber number is supported statistically but Differences in mean tuber weight is not.
+
+#### Low Nitrogen
+
+> n = 6 for each treatment group
+
+```{r}
+lowN_data.reduced <- lowN_data %>%
+  filter(plot != "R4" &
+           plot != "R5")
+
+```
+
+##### Shoot Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry shoot data
+lm_lowN_shoot.red <- lm(shoot_dry_wt_g ~ 1 + inoc, lowN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_shoot.red, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_lowN_shoot.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.shoots.red.emm.all <- emmeans(lm_lowN_shoots, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.shoots.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_reduced_shoot/lowN.reduced.shoot.CI.plot.pdf")
+lowN.red.shoot.CI.plot <- plot(lowN.shoots.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+lowN.red.shoot.CI.plot
+dev.off()
+lowN.red.shoot.CI.plot
+
+# Pairwise P-Value Plot
+lowN.red.shoot.pwpp <- pwpp(lowN.shoots.red.emm.all) # Pairwise P-value Plot
+
+lowN.red.shoot.pwpp <- lowN.red.shoot.pwpp + labs(title = "Low Nitrogen Dry Shoot Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.red.shoot.pwpp
+
+ggsave("./Plots/lowN_reduced_shoot/lowN.reduced.shoot.pwpp.pdf", lowN.red.shoot.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_lowN_shoot.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Based on the **reduced experimental data with 3 of the 5 complete blocks**, the estimated mean dry shoot weight of potato plants subjected to low N treatment while receiving mono-isolate inoculations with bacterial isolates is higher than that of the mock inoculated control plants. Plants under low-N that received the inoculation pool of 3 microbes have a mean shoot weight higher than the mock, but the confidence in the mean estimate difference is much lower and the effect size is smaller than that of mono-isolate inoculations. The P-values for the mean estimate comparisons between the mock control plants and those receiving 201849 and 201900 inoculations are both very low (0.05 and 0.01 respectively), which boosts the confidence in the estimated difference in mean shoot weight.
+
+###### Bar Plot
+
+> n=6
+
+```{r}
+
+lowN_data.red_grp <- lowN_data.reduced %>% group_by(inoc)
+
+stat_lowN_shoots.red <- summarise(lowN_data.red_grp, Nitrogen = "low", N=length(shoot_dry_wt_g), Average=mean(shoot_dry_wt_g, na.rm = TRUE), CI95=conf_int95(shoot_dry_wt_g), SE=std_error(shoot_dry_wt_g)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_shoot.red_control <- stat_lowN_shoots.red[4,4] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_shoots.red$control <- as.numeric(low_shoot.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_shoots.red <- mutate(stat_lowN_shoots.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_shoot.red <- ggplot(stat_lowN_shoots.red, aes(x = inoc, y = Average))
+bar_lowN_shoot.red <- bar_lowN_shoot.red + geom_bar(stat = "identity", size=.5, fill="seagreen3")
+bar_lowN_shoot.red <- bar_lowN_shoot.red + geom_hline(aes(yintercept=stat_lowN_shoots.red$control), colour="#000000", linetype="dashed")
+bar_lowN_shoot.red <- bar_lowN_shoot.red + labs(y="Dry Shoot Weight (g)")
+bar_lowN_shoot.red <- bar_lowN_shoot.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_shoot.red <- bar_lowN_shoot.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_lowN_shoot.red <- bar_lowN_shoot.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_lowN_shoot.red <- bar_lowN_shoot.red + scale_y_continuous(expand = c(0,0), limits = c(0,7.5))
+
+# significance table
+bar_lowN_shoot.red_label.df <- data.frame(inoc = c("201849", "201900"),
+                                          Average = c(6, 7))
+
+bar_lowN_shoot.red <- bar_lowN_shoot.red + geom_text(data = bar_lowN_shoot.red_label.df, label = "*", size = 8)
+
+bar_lowN_shoot.red
+
+# save plot
+ggsave("./Plots/lowN_reduced_shoot/lowN.reduced.shoot.barplot.pdf", bar_lowN_shoot.red)
+```
+
+> Increases in shoot biomass were observed for 201849 and 201900 inoculated plants compared to the mock-inoculated plants. The effect size corresponds to roughly a 25% increase in shoot biomass.
+
+##### Root Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry root data
+lm_lowN_root.red <- lm(root_dry_wt_g ~ 1 + inoc, lowN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_root, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_lowN_root.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.root.red.emm.all <- emmeans(lm_lowN_root.red, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.root.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_reduced_root/lowN.reduced.root.CI.plot.pdf")
+lowN.red.root.CI.plot <- plot(lowN.root.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Shoot Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+lowN.red.root.CI.plot
+dev.off()
+lowN.red.root.CI.plot
+
+# Pairwise P-Value Plot
+lowN.red.root.pwpp <- pwpp(lowN.root.red.emm.all) # Pairwise P-value Plot
+
+lowN.red.root.pwpp <- lowN.red.root.pwpp + labs(title = "Low Nitrogen Dry Root Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Dry Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.red.root.pwpp
+
+ggsave("./Plots/lowN_reduced_root/lowN.reduced.root.pwpp.pdf", lowN.red.root.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_lowN_root.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> Mean root weights are higher for mono and pool inoculated plants, but the confidence in the means are weak based on statistical analysis of the data. This is due to high variance of the data points for each treatment.
+
+###### Bar Plot
+
+> n=10
+
+```{r}
+
+lowN_data.red_grp <- lowN_data.reduced %>% group_by(inoc)
+
+stat_lowN_roots.red <- summarise(lowN_data.red_grp, Nitrogen = "low", N=length(root_dry_wt_g), Average=mean(root_dry_wt_g, na.rm = TRUE), CI95=conf_int95(root_dry_wt_g), SE=std_error(root_dry_wt_g)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_root.red_control <- stat_lowN_roots.red[4,4] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_roots.red$control <- as.numeric(low_root.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_roots.red <- mutate(stat_lowN_roots.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_root.red <- ggplot(stat_lowN_roots.red, aes(x = inoc, y = Average))
+bar_lowN_root.red <- bar_lowN_root.red + geom_bar(stat = "identity", size=.5, fill="tan3")
+bar_lowN_root.red <- bar_lowN_root.red + geom_hline(aes(yintercept=stat_lowN_roots.red$control), colour="#000000", linetype="dashed")
+bar_lowN_root.red <- bar_lowN_root.red + labs(y="Dry Root Weight (g)")
+bar_lowN_root.red <- bar_lowN_root.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_root.red <- bar_lowN_root.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_lowN_root.red <- bar_lowN_root.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_lowN_root.red <- bar_lowN_root.red + scale_y_continuous(expand = c(0,0), limits = c(0,29), breaks = c(0, 5, 10, 15, 20, 25))
+
+# significance table
+bar_lowN_root.red_label.df <- data.frame(inoc = c("201849", "201900"),
+                                          Average = c(25, 26.5))
+
+bar_lowN_root.red <- bar_lowN_root.red + geom_text(data = bar_lowN_root.red_label.df, label = "*", size = 8)
+
+bar_lowN_root.red
+
+# save plot
+ggsave("./Plots/lowN_reduced_root/lowN.reduced.root.barplot.pdf", bar_lowN_root.red)
+```
+
+> All microbe-inoculated groups have higher average dry root weights with the reduced dataset, but the condifence levels in the difference comparisons are relatively low based on the P-values above.
+
+##### Tuber Dry Weight
+
+> Linear Modeling
+
+```{r}
+# linear model of dry tuber data
+lm_lowN_tuber.red <- lm(tuber_wt_g ~ 1 + inoc, lowN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_tuber, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_lowN_tuber.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.tuber.red.emm.all <- emmeans(lm_lowN_tuber.red, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.tuber.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_reduced_tuber_wt//lowN.reduced.tuber_wt.CI.plot.pdf")
+lowN.red.tuber.CI.plot <- plot(lowN.tuber.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Dry Tuber Weight Under Low-N (g)",
+                               ylab = "Inoculation Treatment", cex.axis = 1.5)
+lowN.red.tuber.CI.plot
+dev.off()
+lowN.red.tuber.CI.plot
+
+# Pairwise P-Value Plot
+lowN.red.tuber.pwpp <- pwpp(lowN.tuber.red.emm.all) # Pairwise P-value Plot
+
+lowN.red.tuber.pwpp <- lowN.red.tuber.pwpp + labs(title = "Low Nitrogen Tuber Weight (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Fresh Weight (g)") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.red.tuber.pwpp
+
+ggsave("./Plots/lowN_reduced_tuber_wt//lowN.reduced.tuber_wt.pwpp.pdf", lowN.red.tuber.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_lowN_tuber.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> P-values for all pairwise comparisons among treatment groups are high for this response variable. Therefore confidence in the estimated differences based on the dataset is low.
+
+###### Bar Plot
+
+> n=10
+
+```{r}
+
+lowN_data.red_grp <- lowN_data.reduced %>% group_by(inoc)
+
+stat_lowN_tubers.red <- summarise(lowN_data.red_grp, Nitrogen = "low", N=length(tuber_wt_g), Average=mean(tuber_wt_g, na.rm = TRUE), CI95=conf_int95(tuber_wt_g), SE=std_error(tuber_wt_g)) %>%
+  filter(inoc != "Pool")
+
+```
+
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_tubers.red_control <- stat_lowN_tubers.red[4,4] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_tubers.red$control <- as.numeric(low_tubers.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_tubers.red <- mutate(stat_lowN_tubers.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_tubers.red <- ggplot(stat_lowN_tubers.red, aes(x = inoc, y = Average))
+bar_lowN_tubers.red <- bar_lowN_tubers.red + geom_bar(stat = "identity", size=.5, fill="tomato3")
+bar_lowN_tubers.red <- bar_lowN_tubers.red + geom_hline(aes(yintercept=stat_lowN_tubers.red$control), colour="#000000", linetype="dashed")
+bar_lowN_tubers.red <- bar_lowN_tubers.red + labs(y="Tuber Weight (g)")
+bar_lowN_tubers.red <- bar_lowN_tubers.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_tubers.red <- bar_lowN_tubers.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_lowN_tubers.red <- bar_lowN_tubers.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_lowN_tubers.red <- bar_lowN_tubers.red + scale_y_continuous(expand = c(0,0), limits = c(0,70), breaks = c(0, 15, 30, 45, 60))
+
+bar_lowN_tubers.red
+
+# save plot
+ggsave("./Plots/lowN_reduced_tuber_wt/lowN.reduced.tubers.barplot.pdf", bar_lowN_tubers.red)
+```
+
+> While the average tuber weight for 201900 inoculated plants is higher than that of the Mock-inoculated group, the confidence in the estimated difference is low due to high variance in the dataset. 
+
+##### Tuber Number
+
+> Linear Modeling
+
+```{r}
+# linear model of dry tub_num data
+lm_lowN_tub_num.red <- lm(n_tuber ~ 1 + inoc, lowN_data.reduced)
+op = par(mfrow=c(1,2))
+plot(lm_lowN_tub_num, which = c(2,3))
+par(op)
+```
+
+###### Anova
+```{r}
+anova(lm_lowN_tub_num.red)
+```
+
+###### Estimated Marginal Means Analysis
+
+**All Pair-wise Comparisons**
+
+> Tukey method of correction for multiple testing
+
+* Alpha Level = 0.05
+
+```{r}
+lowN.tub_num.red.emm.all <- emmeans(lm_lowN_tub_num.red, "inoc")
+
+# Show all comparison statistics
+pairs(lowN.tub_num.red.emm.all)
+
+# plot means with confidence intervals
+
+pdf("./Plots/lowN_reduced_tuber_n/lowN.reduced.tub_num_wt.CI.plot.pdf")
+lowN.red.tub_num.CI.plot <- plot(lowN.tub_num.red.emm.all,
+                               comparisons = TRUE,
+                               xlab = "Average Tuber Number Under Low-N",
+                               ylab = "Inoculation Treatment")
+lowN.red.tub_num.CI.plot
+dev.off()
+lowN.red.tub_num.CI.plot
+
+# Pairwise P-Value Plot
+lowN.red.tub_num.pwpp <- pwpp(lowN.tub_num.red.emm.all) # Pairwise P-value Plot
+
+lowN.red.tub_num.pwpp <- lowN.red.tub_num.pwpp + labs(title = "Low Nitrogen Tuber Number (n = 6)",
+                                                  x = "Tukey-adjusted P value",
+                                                  y = "Average Tuber Number") +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14))
+
+lowN.red.tub_num.pwpp
+
+ggsave("./Plots/lowN_reduced_tuber_n//lowN.reduced.tub_num_wt.pwpp.pdf", lowN.red.tub_num.pwpp)
+
+```
+
+###### EMM trt. vs. ctrl
+```{r}
+emmeans(lm_lowN_tub_num.red, specs = trt.vs.ctrl ~ inoc, ref = 4)
+```
+
+> With the reduced dataset, 201849 and 201900 both have higher tuber number than mock-inoculuated plants on average. However, P-values for the comparisons of the differences between the means are high and lower support for the likelihood that these differences did not occur due to random chance alone.
+
+###### Compute stats for Bar Plots
+
+> n=6
+
+```{r}
+
+lowN_data.red_grp <- lowN_data.reduced %>% group_by(inoc)
+
+stat_lowN_tub_nums.red <- summarise(lowN_data.red_grp, Nitrogen = "low", N=length(n_tuber), Average=mean(n_tuber, na.rm = TRUE), CI95=conf_int95(n_tuber), SE=std_error(n_tuber)) %>%
+  filter(inoc != "Pool")
+
+```
+
+###### Bar Plot
+```{r, fig.width = 10}
+# ggplot with bars
+
+low_tub_nums.red_control <- stat_lowN_tub_nums.red[4,4] # set the control value for lowN Shoot weight
+
+# calculate % control for each treatment
+
+## Store control inouclation values for each genotype
+stat_lowN_tub_nums.red$control <- as.numeric(low_tub_nums.red_control)
+
+## add a column with the control value for Genotype 1 to each record in the data frame.
+stat_lowN_tub_nums.red <- mutate(stat_lowN_tub_nums.red, p_ctrl = (100* (Average / control)))
+
+# Shoot weight plot - low N
+bar_lowN_tub_nums.red <- ggplot(stat_lowN_tub_nums.red, aes(x = inoc, y = Average))
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + geom_bar(stat = "identity", size=.5, fill="dodgerblue")
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + geom_hline(aes(yintercept=stat_lowN_tub_nums.red$control), colour="#000000", linetype="dashed")
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + labs(y="Number of Tubers")
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + geom_errorbar(aes(ymin=Average-SE, ymax=Average+SE), size=.5, width=.2)
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + theme(
+  axis.text.x = element_text(size = 14, angle = 30, hjust = 1),
+  axis.text.y = element_text(size = 14),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 15))
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + scale_x_discrete(labels = Fig3.x.labels)
+bar_lowN_tub_nums.red <- bar_lowN_tub_nums.red + scale_y_continuous(expand = c(0,0), limits = c(0,6.5))
+
+bar_lowN_tub_nums.red
+
+# save plot
+ggsave("./Plots/lowN_reduced_tuber_n/lowN.reduced.tub_nums.barplot.pdf", bar_lowN_tub_nums.red)
+```
+
+> Analysis with the reduced dataset presents low confidence in the estimated increase in tuber number when plants were inoculated with microbes compared to mock-inoculated plants.
+
+## Fig 3 - Cowplot
+```{r}
+theme_set(theme_cowplot())
+Fig3.grid <- plot_grid(bar_hiN_shoot.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_lowN_shoot.red + theme(axis.title.y = element_blank(),
+                                                  axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_hiN_root.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_lowN_root.red + theme(axis.title.y = element_blank(),
+                                                 axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_hiN_tubers.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_lowN_tubers.red + theme(axis.title.y = element_blank(),
+                                                   axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank()),
+                       bar_hiN_tub_nums.red,
+                       bar_lowN_tub_nums.red + theme(axis.title.y = element_blank()),
+                       labels = c("A", "B", "C", "D", "E", "F", "G", "H"),
+                       nrow = 4,
+                       ncol = 2,
+                       label_size = 18,
+                       align = 'v')
+Fig3.grid
+
+ggsave("./Plots/MS2-Fig3.pdf", Fig3.grid, width = 16, height = 16)
+
+ggsave("./Plots/MS2-Fig3.tiff",
+       Fig3.grid,
+       device = "tiff",
+       width = 5,
+       height = 8.75,
+       dpi = 300,
+       compression = "lzw"
+       )
+
+# save as TIFF
+tiff("./Plots/Fig3.tiff", units = "in", width = 10, height = 13, res=300, compression = "lzw+p")
+Fig3.grid
+dev.off()
+```
+
+## Fig 3 - Publication Build
+```{r}
+theme_set(theme_cowplot())
+Fig3.grid2 <- plot_grid(bar_hiN_shoot.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.title.y = element_text(size = 8),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_lowN_shoot.red + theme(axis.title.y = element_blank(),
+                                                  axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_hiN_root.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.title.y = element_text(size = 8),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_lowN_root.red + theme(axis.title.y = element_blank(),
+                                                 axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_hiN_tubers.red + theme(axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.title.y = element_text(size = 8),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_lowN_tubers.red + theme(axis.title.y = element_blank(),
+                                                   axis.text.x = element_blank(),
+                                                 axis.ticks.x.bottom = element_blank(),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_hiN_tub_nums.red + theme(axis.title.y = element_text(size = 8),
+                                                    axis.text.x = element_text(size = 8),
+                                                 axis.text.y = element_text(size = 8)),
+                       bar_lowN_tub_nums.red + theme(axis.title.y = element_blank(),
+                                                     axis.text.x = element_text(size = 8),
+                                                 axis.text.y = element_text(size = 8)),
+                       labels = c("A", "B", "C", "D", "E", "F", "G", "H"),
+                       nrow = 4,
+                       ncol = 2,
+                       label_size = 10,
+                       align = 'v')
+Fig3.grid2
+
+ggsave("./Plots/Fig3-pub.pdf",
+       Fig3.grid2,
+       device = "pdf",
+       units = "in",
+       width = 5,
+       height = 7.9)
+
+```
+
+
+# Analytical Summary
+
+## Full Dataset (n = 10)
+
+**High Nitrogen**
+
+  * No significant difference in shoot weight
+  * No significant difference in root weight
+  * No significant difference in tuber weight
+  * No significant difference in tuber number
+
+**Low Nitrogen**
+
+  * 201849 and 201900 induced significant **increase in shoot biomass** compared to mock-control by 25%, or 125% of control
+  * Microbes appear to increase average root weight, but the confidence in the estimated differences is low.
+  * No substantial difference in tuber weight among treatment groups with low nitrogen.
+  * 201849 appears to increase the average number of tubers, but confidence is low and the increase in number does not correspond to an increase in tuber weight (i.e. yield).
+
+## Reduced Dataset (n = 6)
+
+**High Nitrogen**
+  
+  * There were no observed significant differences in dry shoot weight among the treatment groups.
+  * A Near doubling of underground root biomass accumulation was observed for 201849 and 201900 inoculated plants compared to mock-inoculated control plants. These contrasts in mean estimation for root weight have a high degree of confidence in the likelihood that the difference was due to the inoculation and not random chance alone.
+  * Mock-inoculated plants had the highest tuber weight in this reduced dataset.
+  * 201849 induced a doubling of tuber number in the reduced dataset and the contrast has a reasonable confidence level based on the P-value at the alpha level of 0.05. This provides one piece of evidence to suggest that 201849 may be the causal factor for the observed doubling of tuber number that was observed in the previous experiment.
+
+**Low Nitrogen**
+
+  * With the reduced dataset, 201849 and 201900 both increased the shoot weight of the potato plants by roughly 25% compared to the mock-inoculated control plants under low N-fertilization. These differences have a high degree of confidence based on the alpha-level of 0.05 and associated low P-values.
+  * Underground root biomass was higher for all microbe-inoculated groups compared to mock-inoculated plants, but the confidence levels for the contrasts are low with relatively high P-values.
+  * Inoculation with 201900 produced the highest average tuber weight with the reduced dataset, but our confidence in the likelihood that the difference occurred based on the inoculation rather than due to random chance is low.
+  * 201849 had the highest average tuber number, but the confidence level in the difference estimation with the mock-inoculated plant is low based on the high P-value.
+  
+> Overall, it seems that adding 201849 and 201900 do have some effects on the growth of potato plants, but these effects to do translate to increases in tuber biomass. There are likely hormonal effects occuring with the presence of these microbes in high dosages that impact the development of the potato plant tissues. Increases to udnerground root biomass were observed for High and Low N plants with the reduced dataset, which satisties one of the initial justification criteria to carry out these experiments (support shallow underground roots of potato). In doing this follow up experiment we have acquired evidence that supports the observed doubling in tuber number from the first experiment, where the phenomenon was semi-repeated but not in exactly the same context as in the first experiment. In the first experiment, the doubling effect occured with microbial-pool incoulation whereas in this experiment the doubling was observed with mono-inoculation of isolate 201849. The increase in shoot biomass observed under low nitrogen suggests that providing the microbe to the plant under N-limiting conditions could provide some measurable degree of assistance.
